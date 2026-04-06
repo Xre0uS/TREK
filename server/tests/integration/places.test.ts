@@ -546,7 +546,7 @@ describe('KML/KMZ Import', () => {
       .run('Museums', '#3b82f6', 'Landmark', user.id);
 
     const res = await request(app)
-      .post(`/api/trips/${trip.id}/places/import/kml`)
+      .post(`/api/trips/${trip.id}/places/import/map`)
       .set('Cookie', authCookie(user.id))
       .attach('file', KML_FIXTURE);
 
@@ -572,7 +572,7 @@ describe('KML/KMZ Import', () => {
       .run('Parks', '#22c55e', 'Trees', user.id);
 
     const res = await request(app)
-      .post(`/api/trips/${trip.id}/places/import/kml`)
+      .post(`/api/trips/${trip.id}/places/import/map`)
       .set('Cookie', authCookie(user.id))
       .attach('file', KML_NESTED_FIXTURE);
 
@@ -596,7 +596,7 @@ describe('KML/KMZ Import', () => {
     const trip = createTrip(testDb, user.id);
 
     const res = await request(app)
-      .post(`/api/trips/${trip.id}/places/import/kml`)
+      .post(`/api/trips/${trip.id}/places/import/map`)
       .set('Cookie', authCookie(user.id))
       .attach('file', KML_MALFORMED_FIXTURE);
 
@@ -614,7 +614,7 @@ describe('KML/KMZ Import', () => {
     const nonUtf8Kml = Buffer.concat([prefix, invalidByte, suffix]);
 
     const res = await request(app)
-      .post(`/api/trips/${trip.id}/places/import/kml`)
+      .post(`/api/trips/${trip.id}/places/import/map`)
       .set('Cookie', authCookie(user.id))
       .attach('file', nonUtf8Kml, 'non-utf8.kml');
 
@@ -629,7 +629,7 @@ describe('KML/KMZ Import', () => {
     const trip = createTrip(testDb, user.id);
 
     const res = await request(app)
-      .post(`/api/trips/${trip.id}/places/import/kmz`)
+      .post(`/api/trips/${trip.id}/places/import/map`)
       .set('Cookie', authCookie(user.id))
       .attach('file', KMZ_FIXTURE);
 
@@ -643,7 +643,7 @@ describe('KML/KMZ Import', () => {
     const trip = createTrip(testDb, user.id);
 
     const res = await request(app)
-      .post(`/api/trips/${trip.id}/places/import/kmz`)
+      .post(`/api/trips/${trip.id}/places/import/map`)
       .set('Cookie', authCookie(user.id))
       .attach('file', Buffer.from('not-a-zip-archive'), 'invalid.kmz');
 

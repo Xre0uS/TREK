@@ -411,6 +411,13 @@ export async function importKmzPlaces(tripId: string, kmzBuffer: Buffer): Promis
   return importKmlPlaces(tripId, kmlBuffer);
 }
 
+export async function importMapFile(tripId: string, fileBuffer: Buffer, filename: string): Promise<PlaceImportResult> {
+  const ext = filename.toLowerCase().split('.').pop();
+  if (ext === 'kmz') return importKmzPlaces(tripId, fileBuffer);
+  if (ext === 'kml') return importKmlPlaces(tripId, fileBuffer);
+  throw new Error(`Unsupported map file format: .${ext}. Please upload a .kml or .kmz file.`);
+}
+
 // ---------------------------------------------------------------------------
 // Import Google Maps list
 // ---------------------------------------------------------------------------

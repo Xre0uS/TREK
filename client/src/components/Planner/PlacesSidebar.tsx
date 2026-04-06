@@ -111,9 +111,7 @@ const PlacesSidebar = React.memo(function PlacesSidebar({
     setKmlKmzSummary(null)
 
     try {
-      const result = ext === 'kmz'
-        ? await placesApi.importKmz(tripId, kmlKmzFile)
-        : await placesApi.importKml(tripId, kmlKmzFile)
+      const result = await placesApi.importMapFile(tripId, kmlKmzFile)
 
       await loadTrip(tripId)
       setKmlKmzSummary(result.summary || null)

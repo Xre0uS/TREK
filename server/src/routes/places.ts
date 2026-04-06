@@ -13,8 +13,7 @@ import {
   updatePlace,
   deletePlace,
   importGpx,
-  importKmlPlaces,
-  importKmzPlaces,
+  importMapFile,
   importGoogleList,
   searchPlaceImage,
 } from '../services/placeService';
@@ -74,7 +73,7 @@ router.post('/import/gpx', authenticate, requireTripAccess, uploadMulter.single(
   }
 });
 
-router.post('/import/kml', authenticate, requireTripAccess, uploadMulter.single('file'), (req: Request, res: Response) => {
+router.post('/import/map', authenticate, requireTripAccess, uploadMulter.single('file'), async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   if (!checkPermission('place_edit', authReq.user.role, authReq.trip!.user_id, authReq.user.id, authReq.trip!.user_id !== authReq.user.id)) {
     return res.status(403).json({ error: 'No permission' });
@@ -85,9 +84,9 @@ router.post('/import/kml', authenticate, requireTripAccess, uploadMulter.single(
   if (!file) return res.status(400).json({ error: 'No file uploaded' });
 
   try {
-    const result = importKmlPlaces(tripId, file.buffer);
+    const result = await importMapFile(tripId, file.buffer, file.originalname);
     if (result.count === 0) {
-      return res.status(400).json({ error: 'No valid Placemarks found in KML file', summary: result.summary });
+      return res.status(400).json({ error: 'No valid Placemarks found in map file', summary: result.summary });
     }
 
     res.status(201).json(result);
@@ -95,33 +94,7 @@ router.post('/import/kml', authenticate, requireTripAccess, uploadMulter.single(
       broadcast(tripId, 'place:created', { place }, req.headers['x-socket-id'] as string);
     }
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to import KML file';
-    res.status(400).json({ error: message });
-  }
-});
-
-router.post('/import/kmz', authenticate, requireTripAccess, uploadMulter.single('file'), async (req: Request, res: Response) => {
-  const authReq = req as AuthRequest;
-  if (!checkPermission('place_edit', authReq.user.role, authReq.trip!.user_id, authReq.user.id, authReq.trip!.user_id !== authReq.user.id)) {
-    return res.status(403).json({ error: 'No permission' });
-  }
-
-  const { tripId } = req.params;
-  const file = (req as any).file;
-  if (!file) return res.status(400).json({ error: 'No file uploaded' });
-
-  try {
-    const result = await importKmzPlaces(tripId, file.buffer);
-    if (result.count === 0) {
-      return res.status(400).json({ error: 'No valid Placemarks found in KMZ file', summary: result.summary });
-    }
-
-    res.status(201).json(result);
-    for (const place of result.places) {
-      broadcast(tripId, 'place:created', { place }, req.headers['x-socket-id'] as string);
-    }
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to import KMZ file';
+    const message = err instanceof Error ? err.message : 'Failed to import map file';
     res.status(400).json({ error: message });
   }
 });
