@@ -600,6 +600,7 @@ export function getTripSummary(tripId: number) {
 
   const budgetItems = listBudgetItems(tripId);
   const budget = {
+    items: budgetItems,
     item_count: budgetItems.length,
     total: budgetItems.reduce((sum, i) => sum + (i.total_price || 0), 0),
     currency: trip.currency,
@@ -607,6 +608,7 @@ export function getTripSummary(tripId: number) {
 
   const packingItems = listPackingItems(tripId);
   const packing = {
+    items: packingItems,
     total: packingItems.length,
     checked: (packingItems as { checked: number }[]).filter(i => i.checked).length,
   };

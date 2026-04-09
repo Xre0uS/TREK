@@ -131,7 +131,7 @@ export function registerTripTools(server: McpServer, userId: number): void {
   server.registerTool(
     'get_trip_summary',
     {
-      description: 'Get a full denormalized summary of a trip in a single call: metadata, members, days with assignments and notes, accommodations, budget totals, packing stats, reservations, and collab notes. Use this as a context loader before planning or modifying a trip.',
+      description: 'Get a full denormalized summary of a trip in a single call: metadata, members, days with assignments and notes, accommodations, full budget line items with totals, full packing list with checked status, reservations, collab notes, to-do items, files, and collab poll/message counts. Use this as a context loader before planning or modifying a trip.',
       inputSchema: {
         tripId: z.number().int().positive(),
       },
