@@ -6,6 +6,7 @@ export const SCOPES = {
   TRIPS_READ:          'trips:read',
   TRIPS_WRITE:         'trips:write',
   TRIPS_DELETE:        'trips:delete',
+  TRIPS_SHARE:         'trips:share',
   PLACES_READ:         'places:read',
   PLACES_WRITE:        'places:write',
   PACKING_READ:        'packing:read',
@@ -34,9 +35,10 @@ export interface ScopeInfo {
 }
 
 export const SCOPE_INFO: Record<Scope, ScopeInfo> = {
-  'trips:read':          { label: 'View trips & itineraries',   description: 'Read trips, days, day notes, members, and share links',                    group: 'Trips' },
+  'trips:read':          { label: 'View trips & itineraries',   description: 'Read trips, days, day notes, and members',                              group: 'Trips' },
   'trips:write':         { label: 'Edit trips & itineraries',   description: 'Create and update trips, days, notes, and manage members',                  group: 'Trips' },
   'trips:delete':        { label: 'Delete trips',               description: 'Permanently delete entire trips — this action is irreversible',              group: 'Trips' },
+  'trips:share':         { label: 'Manage share links',         description: 'Create, update, and revoke public share links for trips',                   group: 'Trips' },
   'places:read':         { label: 'View places & map data',     description: 'Read places, day assignments, tags, categories, and visited countries',      group: 'Places' },
   'places:write':        { label: 'Manage places',              description: 'Create, update, and delete places, assignments, tags, and atlas entries',    group: 'Places' },
   'packing:read':        { label: 'View packing lists',         description: 'Read packing items, bags, and category assignees',                          group: 'Packing' },
@@ -59,10 +61,10 @@ export const SCOPE_INFO: Record<Scope, ScopeInfo> = {
 // null scopes = static trek_ token = full access
 // ---------------------------------------------------------------------------
 
-/** trips:read OR trips:write OR trips:delete all grant read access to trips */
+/** trips:read OR trips:write OR trips:delete OR trips:share all grant read access to trips */
 export function canReadTrips(scopes: string[] | null): boolean {
   if (!scopes) return true;
-  return scopes.some(s => s === 'trips:read' || s === 'trips:write' || s === 'trips:delete');
+  return scopes.some(s => s === 'trips:read' || s === 'trips:write' || s === 'trips:delete' || s === 'trips:share');
 }
 
 /** group:write grants write access; for trips canReadTrips handles read */
@@ -81,6 +83,12 @@ export function canRead(scopes: string[] | null, group: string): boolean {
 export function canDeleteTrips(scopes: string[] | null): boolean {
   if (!scopes) return true;
   return scopes.includes('trips:delete');
+}
+
+/** trips:share is a separate scope for managing public share links */
+export function canShareTrips(scopes: string[] | null): boolean {
+  if (!scopes) return true;
+  return scopes.includes('trips:share');
 }
 
 export function validateScopes(requestedScopes: string[]): { valid: boolean; invalid: string[] } {

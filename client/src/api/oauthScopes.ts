@@ -8,9 +8,10 @@ export interface ScopeInfo {
 }
 
 export const SCOPE_GROUPS: Record<string, ScopeInfo> = {
-  'trips:read':          { label: 'View trips & itineraries',   description: 'Read trips, days, day notes, members, and share links',                    group: 'Trips' },
+  'trips:read':          { label: 'View trips & itineraries',   description: 'Read trips, days, day notes, and members',                              group: 'Trips' },
   'trips:write':         { label: 'Edit trips & itineraries',   description: 'Create and update trips, days, notes, and manage members',                  group: 'Trips' },
   'trips:delete':        { label: 'Delete trips',               description: 'Permanently delete entire trips — this action is irreversible',              group: 'Trips' },
+  'trips:share':         { label: 'Manage share links',         description: 'Create, update, and revoke public share links for trips',                   group: 'Trips' },
   'places:read':         { label: 'View places & map data',     description: 'Read places, day assignments, tags, categories, and visited countries',      group: 'Places' },
   'places:write':        { label: 'Manage places',              description: 'Create, update, and delete places, assignments, tags, and atlas entries',    group: 'Places' },
   'packing:read':        { label: 'View packing lists',         description: 'Read packing items, bags, and category assignees',                          group: 'Packing' },

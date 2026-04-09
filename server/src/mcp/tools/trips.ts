@@ -24,12 +24,13 @@ import {
   TOOL_ANNOTATIONS_DELETE, TOOL_ANNOTATIONS_NON_IDEMPOTENT,
   demoDenied, noAccess, ok,
 } from './_shared';
-import { canReadTrips, canWrite, canDeleteTrips } from '../scopes';
+import { canReadTrips, canWrite, canDeleteTrips, canShareTrips } from '../scopes';
 
 export function registerTripTools(server: McpServer, userId: number, scopes: string[] | null): void {
   const R = canReadTrips(scopes);
   const W = canWrite(scopes, 'trips');
   const D = canDeleteTrips(scopes);
+  const S = canShareTrips(scopes);
 
   // --- TRIPS ---
 
@@ -280,7 +281,7 @@ export function registerTripTools(server: McpServer, userId: number, scopes: str
     }
   );
 
-  if (R) server.registerTool(
+  if (S) server.registerTool(
     'get_share_link',
     {
       description: 'Get the current public share link for a trip, including its permission flags. Returns null if no share link exists.',
@@ -296,7 +297,7 @@ export function registerTripTools(server: McpServer, userId: number, scopes: str
     }
   );
 
-  if (W) server.registerTool(
+  if (S) server.registerTool(
     'create_share_link',
     {
       description: 'Create or update the public share link for a trip. Set permission flags to control what is visible to guests.',
@@ -324,7 +325,7 @@ export function registerTripTools(server: McpServer, userId: number, scopes: str
     }
   );
 
-  if (W) server.registerTool(
+  if (S) server.registerTool(
     'delete_share_link',
     {
       description: 'Revoke the public share link for a trip. Guests will no longer be able to access the shared view.',

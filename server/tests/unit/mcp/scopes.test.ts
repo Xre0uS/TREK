@@ -9,6 +9,7 @@ import {
   canWrite,
   canRead,
   canDeleteTrips,
+  canShareTrips,
   ALL_SCOPES,
   SCOPE_INFO,
 } from '../../../src/mcp/scopes';
@@ -22,6 +23,7 @@ describe('ALL_SCOPES', () => {
     expect(ALL_SCOPES).toContain('trips:read');
     expect(ALL_SCOPES).toContain('trips:write');
     expect(ALL_SCOPES).toContain('trips:delete');
+    expect(ALL_SCOPES).toContain('trips:share');
     expect(ALL_SCOPES).toContain('budget:read');
     expect(ALL_SCOPES).toContain('budget:write');
     expect(ALL_SCOPES).toContain('packing:read');
@@ -122,6 +124,10 @@ describe('canReadTrips', () => {
     expect(canReadTrips(['trips:delete'])).toBe(true);
   });
 
+  it('returns true when trips:share is present', () => {
+    expect(canReadTrips(['trips:share'])).toBe(true);
+  });
+
   it('returns false when only unrelated scopes are present', () => {
     expect(canReadTrips(['budget:read', 'packing:write'])).toBe(false);
   });
@@ -212,5 +218,39 @@ describe('canDeleteTrips', () => {
 
   it('returns false for empty scopes array', () => {
     expect(canDeleteTrips([])).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// canShareTrips
+// ---------------------------------------------------------------------------
+
+describe('canShareTrips', () => {
+  it('returns true when scopes is null (full access)', () => {
+    expect(canShareTrips(null)).toBe(true);
+  });
+
+  it('returns true when trips:share is present', () => {
+    expect(canShareTrips(['trips:share'])).toBe(true);
+  });
+
+  it('returns false when only trips:read is present', () => {
+    expect(canShareTrips(['trips:read'])).toBe(false);
+  });
+
+  it('returns false when only trips:write is present', () => {
+    expect(canShareTrips(['trips:write'])).toBe(false);
+  });
+
+  it('returns false when only trips:delete is present', () => {
+    expect(canShareTrips(['trips:delete'])).toBe(false);
+  });
+
+  it('returns false for unrelated scopes', () => {
+    expect(canShareTrips(['budget:write', 'packing:read'])).toBe(false);
+  });
+
+  it('returns false for empty scopes array', () => {
+    expect(canShareTrips([])).toBe(false);
   });
 });

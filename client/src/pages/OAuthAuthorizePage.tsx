@@ -173,43 +173,64 @@ export default function OAuthAuthorizePage(): React.ReactElement {
   // pageState === 'consent'
   return (
     <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'var(--bg-primary)' }}>
-      <div className="w-full max-w-sm rounded-xl shadow-lg overflow-hidden" style={{ background: 'var(--bg-card)' }}>
-        {/* Header */}
-        <div className="px-8 pt-8 pb-5 text-center space-y-3">
-          <div className="flex justify-center">
+      <div className="w-full max-w-2xl rounded-xl shadow-lg overflow-hidden flex flex-col sm:flex-row" style={{ background: 'var(--bg-card)' }}>
+
+        {/* Left panel — app identity + actions */}
+        <div className="sm:w-64 sm:flex-shrink-0 flex flex-col px-8 py-8 sm:border-r" style={{ borderColor: 'var(--border-primary)' }}>
+          <div className="flex-1 space-y-4">
             <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: 'var(--bg-secondary)' }}>
               <ShieldCheck className="w-6 h-6" style={{ color: 'var(--accent-primary, #4f46e5)' }} />
             </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide mb-1" style={{ color: 'var(--text-tertiary)' }}>Authorization Request</p>
+              <h1 className="text-lg font-semibold leading-snug" style={{ color: 'var(--text-primary)' }}>
+                {validation?.client?.name || clientId}
+              </h1>
+              <p className="text-sm mt-2" style={{ color: 'var(--text-secondary)' }}>
+                This application is requesting access to your TREK account.
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide mb-1" style={{ color: 'var(--text-tertiary)' }}>Authorization Request</p>
-            <h1 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
-              {validation?.client?.name || clientId}
-            </h1>
-            <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-              This application is requesting access to your TREK account.
+
+          <div className="mt-8 space-y-2">
+            <p className="text-xs mb-3" style={{ color: 'var(--text-tertiary)' }}>
+              Only grant access to applications you trust. Your data stays on your server.
             </p>
+            <button
+              onClick={() => submitConsent(true)}
+              disabled={submitting}
+              className="w-full px-4 py-2.5 rounded-lg text-sm font-medium text-white disabled:opacity-60 transition-opacity"
+              style={{ background: 'var(--accent-primary, #4f46e5)' }}>
+              {submitting ? 'Authorizing…' : 'Approve Access'}
+            </button>
+            <button
+              onClick={() => submitConsent(false)}
+              disabled={submitting}
+              className="w-full px-4 py-2.5 rounded-lg text-sm font-medium border transition-colors hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-60"
+              style={{ borderColor: 'var(--border-primary)', color: 'var(--text-secondary)' }}>
+              Deny
+            </button>
           </div>
         </div>
 
-        {/* Scope list */}
-        <div className="px-8 pb-5">
-          <p className="text-xs font-medium uppercase tracking-wide mb-3" style={{ color: 'var(--text-tertiary)' }}>
+        {/* Right panel — scopes */}
+        <div className="flex-1 px-6 py-8 overflow-y-auto max-h-[80vh] sm:max-h-[600px]">
+          <p className="text-xs font-medium uppercase tracking-wide mb-4" style={{ color: 'var(--text-tertiary)' }}>
             Permissions requested
           </p>
-          <div className="space-y-3">
+          <div className="space-y-5">
             {Object.entries(scopesByGroup).map(([group, groupScopes]) => (
               <div key={group}>
-                <p className="text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{group}</p>
+                <p className="text-xs font-semibold mb-2" style={{ color: 'var(--text-secondary)' }}>{group}</p>
                 <div className="space-y-1.5">
                   {groupScopes.map(s => {
                     const info = SCOPE_GROUPS[s]
                     return (
                       <div key={s} className="flex items-start gap-2.5 px-3 py-2 rounded-lg" style={{ background: 'var(--bg-secondary)' }}>
-                        <span className="mt-0.5 text-base leading-none">
+                        <span className="mt-0.5 text-base leading-none flex-shrink-0">
                           {s.endsWith(':delete') ? '🗑️' : s.endsWith(':write') ? '✏️' : '👁️'}
                         </span>
-                        <div>
+                        <div className="min-w-0">
                           <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{info?.label || s}</p>
                           <p className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{info?.description || ''}</p>
                         </div>
@@ -222,26 +243,6 @@ export default function OAuthAuthorizePage(): React.ReactElement {
           </div>
         </div>
 
-        {/* Footer / actions */}
-        <div className="px-8 pb-8 space-y-2">
-          <p className="text-xs text-center mb-3" style={{ color: 'var(--text-tertiary)' }}>
-            Only grant access to applications you trust. Your data stays on your server.
-          </p>
-          <button
-            onClick={() => submitConsent(true)}
-            disabled={submitting}
-            className="w-full px-4 py-2.5 rounded-lg text-sm font-medium text-white disabled:opacity-60 transition-opacity"
-            style={{ background: 'var(--accent-primary, #4f46e5)' }}>
-            {submitting ? 'Authorizing…' : 'Approve Access'}
-          </button>
-          <button
-            onClick={() => submitConsent(false)}
-            disabled={submitting}
-            className="w-full px-4 py-2.5 rounded-lg text-sm font-medium border transition-colors hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-60"
-            style={{ borderColor: 'var(--border-primary)', color: 'var(--text-secondary)' }}>
-            Deny
-          </button>
-        </div>
       </div>
     </div>
   )
