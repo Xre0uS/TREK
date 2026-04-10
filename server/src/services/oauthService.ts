@@ -4,14 +4,20 @@ import { isAddonEnabled } from './adminService';
 import { validateScopes } from '../mcp/scopes';
 import { ADDON_IDS } from '../addons';
 import { User } from '../types';
+import { writeAudit, logWarn } from './auditLog';
+import { revokeUserSessionsForClient } from '../mcp/sessionManager';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const ACCESS_TOKEN_TTL_S  = 60 * 60;                          // 1 hour
-const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;       // 30 days rolling
+const ACCESS_TOKEN_TTL_S   = 60 * 60;                          // 1 hour
+const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;        // 30 days rolling
 const AUTH_CODE_TTL_MS     = 2 * 60 * 1000;                   // 2 minutes
+
+// PKCE format (RFC 7636)
+const CODE_CHALLENGE_RE = /^[A-Za-z0-9_-]{43}$/;
+const CODE_VERIFIER_RE  = /^[A-Za-z0-9\-._~]{43,128}$/;
 
 // ---------------------------------------------------------------------------
 // In-memory auth code store (short-lived, no need for DB persistence)
@@ -61,6 +67,7 @@ interface OAuthTokenRow {
   access_token_expires_at: string;
   refresh_token_expires_at: string;
   revoked_at: string | null;
+  parent_token_id: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -69,6 +76,14 @@ interface OAuthTokenRow {
 
 function hashToken(raw: string): string {
   return createHash('sha256').update(raw).digest('hex');
+}
+
+/** Constant-time comparison of two hex-encoded SHA-256 hashes. */
+function timingSafeEqualHex(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
+  } catch { return false; }
 }
 
 function generateAccessToken(): string {
@@ -99,6 +114,7 @@ export function createOAuthClient(
   name: string,
   redirectUris: string[],
   allowedScopes: string[],
+  ip?: string | null,
 ): { error?: string; status?: number; client?: Record<string, unknown> } {
   if (!name?.trim()) return { error: 'Name is required', status: 400 };
   if (name.trim().length > 100) return { error: 'Name must be 100 characters or less', status: 400 };
@@ -136,6 +152,8 @@ export function createOAuthClient(
     'SELECT id, user_id, name, client_id, redirect_uris, allowed_scopes, created_at FROM oauth_clients WHERE id = ?'
   ).get(id) as OAuthClientRow;
 
+  writeAudit({ userId, action: 'oauth.client.create', details: { client_id: clientId, name: name.trim() }, ip });
+
   return {
     client: {
       id: row.id,
@@ -153,8 +171,9 @@ export function createOAuthClient(
 export function rotateOAuthClientSecret(
   userId: number,
   clientRowId: string,
+  ip?: string | null,
 ): { error?: string; status?: number; client_secret?: string } {
-  const row = db.prepare('SELECT id FROM oauth_clients WHERE id = ? AND user_id = ?').get(clientRowId, userId) as OAuthClientRow | undefined;
+  const row = db.prepare('SELECT id, client_id FROM oauth_clients WHERE id = ? AND user_id = ?').get(clientRowId, userId) as OAuthClientRow | undefined;
   if (!row) return { error: 'Client not found', status: 404 };
 
   const rawSecret  = 'trekcs_' + randomBytes(24).toString('hex');
@@ -163,7 +182,13 @@ export function rotateOAuthClientSecret(
   db.prepare('UPDATE oauth_clients SET client_secret_hash = ? WHERE id = ?').run(secretHash, clientRowId);
 
   // Revoke all existing tokens for this client so old sessions are invalidated
-  db.prepare("UPDATE oauth_tokens SET revoked_at = datetime('now') WHERE client_id = (SELECT client_id FROM oauth_clients WHERE id = ?) AND revoked_at IS NULL").run(clientRowId);
+  db.prepare("UPDATE oauth_tokens SET revoked_at = datetime('now') WHERE client_id = ? AND revoked_at IS NULL").run(row.client_id);
+
+  // Terminate active MCP sessions for this (user, client) pair
+
+  revokeUserSessionsForClient(userId, row.client_id);
+
+  writeAudit({ userId, action: 'oauth.client.rotate_secret', details: { client_id: row.client_id }, ip });
 
   return { client_secret: rawSecret };
 }
@@ -171,10 +196,12 @@ export function rotateOAuthClientSecret(
 export function deleteOAuthClient(
   userId: number,
   clientRowId: string,
+  ip?: string | null,
 ): { error?: string; status?: number; success?: boolean } {
-  const row = db.prepare('SELECT id FROM oauth_clients WHERE id = ? AND user_id = ?').get(clientRowId, userId);
+  const row = db.prepare('SELECT id, client_id FROM oauth_clients WHERE id = ? AND user_id = ?').get(clientRowId, userId) as OAuthClientRow | undefined;
   if (!row) return { error: 'Client not found', status: 404 };
   db.prepare('DELETE FROM oauth_clients WHERE id = ?').run(clientRowId);
+  writeAudit({ userId, action: 'oauth.client.delete', details: { client_id: row.client_id }, ip });
   return { success: true };
 }
 
@@ -214,10 +241,14 @@ export function getConsent(clientId: string, userId: number): string[] | null {
   return row ? JSON.parse(row.scopes) : null;
 }
 
-export function saveConsent(clientId: string, userId: number, scopes: string[]): void {
+export function saveConsent(clientId: string, userId: number, scopes: string[], ip?: string | null): void {
+  // Union existing consent with newly approved scopes (M5: never narrow stored consent)
+  const existing = getConsent(clientId, userId) ?? [];
+  const merged = Array.from(new Set([...existing, ...scopes]));
   db.prepare(
     'INSERT OR REPLACE INTO oauth_consents (client_id, user_id, scopes, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)'
-  ).run(clientId, userId, JSON.stringify(scopes));
+  ).run(clientId, userId, JSON.stringify(merged));
+  writeAudit({ userId, action: 'oauth.consent.grant', details: { client_id: clientId, scopes: merged }, ip });
 }
 
 export function isConsentSufficient(existingScopes: string[], requestedScopes: string[]): boolean {
@@ -232,6 +263,7 @@ export function issueTokens(
   clientId: string,
   userId: number,
   scopes: string[],
+  parentTokenId: number | null = null,
 ): {
   access_token: string;
   refresh_token: string;
@@ -250,9 +282,9 @@ export function issueTokens(
 
   db.prepare(`
     INSERT INTO oauth_tokens
-      (client_id, user_id, access_token_hash, refresh_token_hash, scopes, access_token_expires_at, refresh_token_expires_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(clientId, userId, accessHash, refreshHash, JSON.stringify(scopes), accessExpiry.toISOString(), refreshExpiry.toISOString());
+      (client_id, user_id, access_token_hash, refresh_token_hash, scopes, access_token_expires_at, refresh_token_expires_at, parent_token_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(clientId, userId, accessHash, refreshHash, JSON.stringify(scopes), accessExpiry.toISOString(), refreshExpiry.toISOString(), parentTokenId);
 
   return {
     access_token:  rawAccess,
@@ -270,13 +302,14 @@ export function issueTokens(
 export interface OAuthTokenInfo {
   user: User;
   scopes: string[];
+  clientId: string;
 }
 
 export function getUserByAccessToken(rawToken: string): OAuthTokenInfo | null {
   const hash = hashToken(rawToken);
   const row = db.prepare(`
     SELECT ot.scopes, ot.revoked_at, ot.access_token_expires_at,
-           ot.user_id, u.username, u.email, u.role
+           ot.user_id, ot.client_id, u.username, u.email, u.role
     FROM oauth_tokens ot
     JOIN users u ON ot.user_id = u.id
     WHERE ot.access_token_hash = ?
@@ -289,50 +322,122 @@ export function getUserByAccessToken(rawToken: string): OAuthTokenInfo | null {
   return {
     user: { id: row.user_id, username: row.username, email: row.email, role: row.role as 'admin' | 'user' },
     scopes: JSON.parse(row.scopes),
+    clientId: row.client_id,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Token refresh (rotation)
+// Token refresh (rotation + replay detection)
 // ---------------------------------------------------------------------------
+
+/** Walk parent_token_id upward to find the root token id of this rotation chain. */
+function findChainRoot(tokenId: number): number {
+  let current = tokenId;
+  for (let i = 0; i < 100; i++) {
+    const row = db.prepare('SELECT id, parent_token_id FROM oauth_tokens WHERE id = ?').get(current) as { id: number; parent_token_id: number | null } | undefined;
+    if (!row || row.parent_token_id === null) return current;
+    current = row.parent_token_id;
+  }
+  return current;
+}
+
+/** Revoke all tokens in the rotation chain rooted at rootId. Returns affected ids. */
+function revokeChain(rootId: number): number[] {
+  const rows = db.prepare(`
+    WITH RECURSIVE chain(id) AS (
+      SELECT id FROM oauth_tokens WHERE id = ?
+      UNION ALL
+      SELECT t.id FROM oauth_tokens t JOIN chain c ON t.parent_token_id = c.id
+    )
+    SELECT id FROM chain
+  `).all(rootId) as { id: number }[];
+  const ids = rows.map(r => r.id);
+  if (ids.length > 0) {
+    db.prepare(
+      `UPDATE oauth_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE id IN (${ids.map(() => '?').join(',')}) AND revoked_at IS NULL`
+    ).run(...ids);
+  }
+  return ids;
+}
 
 export function refreshTokens(
   rawRefreshToken: string,
   clientId: string,
   clientSecret: string,
+  ip?: string | null,
 ): { error?: string; status?: number; tokens?: ReturnType<typeof issueTokens> } {
   const client = db.prepare('SELECT client_id, client_secret_hash FROM oauth_clients WHERE client_id = ?').get(clientId) as OAuthClientRow | undefined;
   if (!client) return { error: 'invalid_client', status: 401 };
-  if (hashToken(clientSecret) !== client.client_secret_hash) return { error: 'invalid_client', status: 401 };
+  if (!timingSafeEqualHex(hashToken(clientSecret), client.client_secret_hash)) return { error: 'invalid_client', status: 401 };
 
   const hash = hashToken(rawRefreshToken);
   const row = db.prepare(`
-    SELECT id, client_id, user_id, scopes, refresh_token_expires_at, revoked_at
+    SELECT id, client_id, user_id, scopes, refresh_token_expires_at, revoked_at, parent_token_id
     FROM oauth_tokens WHERE refresh_token_hash = ?
   `).get(hash) as OAuthTokenRow | undefined;
 
   if (!row) return { error: 'invalid_grant', status: 400 };
   if (row.client_id !== clientId) return { error: 'invalid_grant', status: 400 };
-  if (row.revoked_at) return { error: 'invalid_grant', status: 400 };
+
+  // ---- Replay detection (C3) ----
+  if (row.revoked_at) {
+    // A revoked refresh token was replayed — assume token theft. Cascade-revoke the chain.
+    const rootId = findChainRoot(row.id);
+    revokeChain(rootId);
+
+  
+    revokeUserSessionsForClient(row.user_id, clientId);
+
+    writeAudit({
+      userId: row.user_id,
+      action: 'oauth.token.replay_detected',
+      details: { client_id: clientId },
+      ip,
+    });
+    logWarn(`[OAuth] Refresh token replay detected for user=${row.user_id} client=${clientId} ip=${ip ?? '-'}`);
+
+    return { error: 'invalid_grant', status: 400 };
+  }
+
   if (new Date(row.refresh_token_expires_at) < new Date()) return { error: 'invalid_grant', status: 400 };
 
-  // Revoke old pair immediately (rotation)
+  // Revoke old pair immediately (rotation) and issue new pair linked to old row
   db.prepare('UPDATE oauth_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE id = ?').run(row.id);
 
-  return { tokens: issueTokens(clientId, row.user_id, JSON.parse(row.scopes)) };
+  // Terminate active MCP sessions for the old token's client so client must re-authenticate
+
+  revokeUserSessionsForClient(row.user_id, clientId);
+
+  const tokens = issueTokens(clientId, row.user_id, JSON.parse(row.scopes), row.id);
+  writeAudit({ userId: row.user_id, action: 'oauth.token.refresh', details: { client_id: clientId }, ip });
+
+  return { tokens };
 }
 
 // ---------------------------------------------------------------------------
 // Token revocation
 // ---------------------------------------------------------------------------
 
-export function revokeToken(rawToken: string, clientId: string): void {
+export function revokeToken(rawToken: string, clientId: string, userId?: number, ip?: string | null): void {
   const hash = hashToken(rawToken);
+
+  // Get the user_id for the token so we can revoke its MCP sessions
+  const row = db.prepare(
+    'SELECT user_id FROM oauth_tokens WHERE (access_token_hash = ? OR refresh_token_hash = ?) AND client_id = ?'
+  ).get(hash, hash, clientId) as { user_id: number } | undefined;
+
   db.prepare(`
     UPDATE oauth_tokens
     SET revoked_at = CURRENT_TIMESTAMP
     WHERE (access_token_hash = ? OR refresh_token_hash = ?) AND client_id = ?
   `).run(hash, hash, clientId);
+
+  const affectedUserId = row?.user_id ?? userId;
+  if (affectedUserId) {
+  
+    revokeUserSessionsForClient(affectedUserId, clientId);
+    writeAudit({ userId: affectedUserId, action: 'oauth.token.revoke', details: { client_id: clientId, method: 'token' }, ip });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -356,10 +461,18 @@ export function listOAuthSessions(userId: number): Record<string, unknown>[] {
 export function revokeSession(
   userId: number,
   sessionId: number,
+  ip?: string | null,
 ): { error?: string; status?: number; success?: boolean } {
-  const row = db.prepare('SELECT id FROM oauth_tokens WHERE id = ? AND user_id = ?').get(sessionId, userId);
+  const row = db.prepare('SELECT id, client_id FROM oauth_tokens WHERE id = ? AND user_id = ?').get(sessionId, userId) as { id: number; client_id: string } | undefined;
   if (!row) return { error: 'Session not found', status: 404 };
+
   db.prepare('UPDATE oauth_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE id = ?').run(sessionId);
+
+
+  revokeUserSessionsForClient(userId, row.client_id);
+
+  writeAudit({ userId, action: 'oauth.token.revoke', details: { client_id: row.client_id, method: 'session' }, ip });
+
   return { success: true };
 }
 
@@ -405,6 +518,11 @@ export function validateAuthorizeRequest(
     return { valid: false, error: 'invalid_request', error_description: 'PKCE with code_challenge_method=S256 is required (OAuth 2.1)' };
   }
 
+  // H1: Enforce code_challenge format (RFC 7636 §4.2)
+  if (!CODE_CHALLENGE_RE.test(params.code_challenge)) {
+    return { valid: false, error: 'invalid_request', error_description: 'code_challenge must be 43 base64url characters (S256)' };
+  }
+
   if (!params.client_id) {
     return { valid: false, error: 'invalid_request', error_description: 'client_id is required' };
   }
@@ -433,12 +551,9 @@ export function validateAuthorizeRequest(
   }
 
   if (userId === null) {
-    return {
-      valid: true,
-      client: { name: client.name, allowed_scopes: allowedScopes },
-      scopes: grantedScopes,
-      loginRequired: true,
-    };
+    // H3: return only the minimum required fields — do NOT expose scopes, client.name, or
+    // allowed_scopes to unauthenticated callers to prevent client enumeration.
+    return { valid: true, loginRequired: true };
   }
 
   const existingConsent = getConsent(params.client_id, userId);
@@ -457,8 +572,15 @@ export function validateAuthorizeRequest(
 // ---------------------------------------------------------------------------
 
 export function verifyPKCE(codeVerifier: string, codeChallenge: string): boolean {
+  // H1: validate code_verifier format before hashing
+  if (!CODE_VERIFIER_RE.test(codeVerifier)) return false;
+
   const expected = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
-  return expected === codeChallenge;
+  // Constant-time compare (both are base64url strings of equal length for S256)
+  if (expected.length !== codeChallenge.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(codeChallenge));
+  } catch { return false; }
 }
 
 // ---------------------------------------------------------------------------
@@ -468,6 +590,7 @@ export function verifyPKCE(codeVerifier: string, codeChallenge: string): boolean
 export function authenticateClient(clientId: string, clientSecret: string): OAuthClientRow | null {
   const client = db.prepare('SELECT * FROM oauth_clients WHERE client_id = ?').get(clientId) as OAuthClientRow | undefined;
   if (!client) return null;
-  if (hashToken(clientSecret) !== client.client_secret_hash) return null;
+  // H4: constant-time comparison to prevent timing side-channel
+  if (!timingSafeEqualHex(hashToken(clientSecret), client.client_secret_hash)) return null;
   return client;
 }

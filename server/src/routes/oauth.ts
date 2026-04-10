@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
-import { authenticate } from '../middleware/auth';
-import { AuthRequest } from '../types';
+import { authenticate, requireCookieAuth, optionalAuth } from '../middleware/auth';
+import { AuthRequest, OptionalAuthRequest } from '../types';
 import { isAddonEnabled } from '../services/adminService';
 import { ALL_SCOPES, SCOPE_INFO } from '../mcp/scopes';
 import { ADDON_IDS } from '../addons';
@@ -23,6 +23,41 @@ import {
   AuthorizeParams,
 } from '../services/oauthService';
 import { getAppUrl } from '../services/oidcService';
+import { writeAudit, getClientIp, logWarn } from '../services/auditLog';
+
+// ---------------------------------------------------------------------------
+// Minimal in-file rate limiter (same pattern as auth.ts)
+// ---------------------------------------------------------------------------
+
+interface RateEntry { count: number; first: number; }
+
+function makeRateLimiter(maxAttempts: number, windowMs: number, keyFn: (req: Request) => string) {
+  const store = new Map<string, RateEntry>();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, r] of store) if (now - r.first >= windowMs) store.delete(k);
+  }, windowMs).unref();
+
+  return (req: Request, res: Response, next: () => void): void => {
+    const key = keyFn(req);
+    const now = Date.now();
+    const record = store.get(key);
+    if (record && record.count >= maxAttempts && now - record.first < windowMs) {
+      res.status(429).json({ error: 'too_many_requests', error_description: 'Too many attempts. Please try again later.' });
+      return;
+    }
+    if (!record || now - record.first >= windowMs) {
+      store.set(key, { count: 1, first: now });
+    } else {
+      record.count++;
+    }
+    next();
+  };
+}
+
+const tokenLimiter    = makeRateLimiter(30, 60_000, (req) => `${req.ip}|${req.body?.client_id ?? ''}`);
+const validateLimiter = makeRateLimiter(30, 60_000, (req) => req.ip ?? 'unknown');
+const revokeLimiter   = makeRateLimiter(10, 60_000, (req) => req.ip ?? 'unknown');
 
 // ---------------------------------------------------------------------------
 // Public router: /.well-known, /oauth/token, /oauth/revoke
@@ -31,7 +66,10 @@ import { getAppUrl } from '../services/oidcService';
 export const oauthPublicRouter = express.Router();
 
 // RFC 8414 discovery document
-oauthPublicRouter.get('/.well-known/oauth-authorization-server', (_req: Request, res: Response) => {
+oauthPublicRouter.get('/.well-known/oauth-authorization-server', (req: Request, res: Response) => {
+  // M2: return 404 (not 403) so feature presence isn't fingerprinted
+  if (!isAddonEnabled(ADDON_IDS.MCP)) return res.status(404).end();
+
   const base = (getAppUrl() || '').replace(/\/+$/, '');
   res.json({
     issuer:                                base,
@@ -50,10 +88,15 @@ oauthPublicRouter.get('/.well-known/oauth-authorization-server', (_req: Request,
 });
 
 // Token endpoint — handles authorization_code and refresh_token grants
-oauthPublicRouter.post('/oauth/token', (req: Request, res: Response) => {
+oauthPublicRouter.post('/oauth/token', tokenLimiter, (req: Request, res: Response) => {
+  // M1: RFC 6749 §5.1 — token responses must not be cached
+  res.set('Cache-Control', 'no-store');
+  res.set('Pragma', 'no-cache');
+
   // Accept both JSON and application/x-www-form-urlencoded
   const body: Record<string, string> = typeof req.body === 'object' ? req.body : {};
   const { grant_type, code, redirect_uri, client_id, client_secret, code_verifier, refresh_token } = body;
+  const ip = getClientIp(req);
 
   if (!isAddonEnabled(ADDON_IDS.MCP)) {
     return res.status(403).json({ error: 'mcp_disabled', error_description: 'MCP is not enabled' });
@@ -70,28 +113,38 @@ oauthPublicRouter.post('/oauth/token', (req: Request, res: Response) => {
     }
 
     const pending = consumeAuthCode(code);
+
+    // H5: collapse all invalid_grant cases to one message; log specifics server-side
     if (!pending) {
-      return res.status(400).json({ error: 'invalid_grant', error_description: 'Authorization code is invalid or expired' });
+      writeAudit({ userId: null, action: 'oauth.token.grant_failed', details: { client_id, reason: 'code_invalid_or_expired' }, ip });
+      return res.status(400).json({ error: 'invalid_grant', error_description: 'Authorization grant is invalid.' });
     }
 
     if (pending.clientId !== client_id) {
-      return res.status(400).json({ error: 'invalid_grant', error_description: 'client_id mismatch' });
+      writeAudit({ userId: pending.userId, action: 'oauth.token.grant_failed', details: { client_id, reason: 'client_id_mismatch' }, ip });
+      return res.status(400).json({ error: 'invalid_grant', error_description: 'Authorization grant is invalid.' });
     }
+
     if (pending.redirectUri !== redirect_uri) {
-      return res.status(400).json({ error: 'invalid_grant', error_description: 'redirect_uri mismatch' });
+      writeAudit({ userId: pending.userId, action: 'oauth.token.grant_failed', details: { client_id, reason: 'redirect_uri_mismatch' }, ip });
+      return res.status(400).json({ error: 'invalid_grant', error_description: 'Authorization grant is invalid.' });
     }
 
     // Verify client secret
     if (!authenticateClient(client_id, client_secret)) {
+      logWarn(`[OAuth] Invalid client credentials for client_id=${client_id} ip=${ip ?? '-'}`);
+      writeAudit({ userId: pending.userId, action: 'oauth.token.client_auth_failed', details: { client_id }, ip });
       return res.status(401).json({ error: 'invalid_client', error_description: 'Invalid client credentials' });
     }
 
     // Verify PKCE
     if (!verifyPKCE(code_verifier, pending.codeChallenge)) {
-      return res.status(400).json({ error: 'invalid_grant', error_description: 'PKCE verification failed' });
+      writeAudit({ userId: pending.userId, action: 'oauth.token.grant_failed', details: { client_id, reason: 'pkce_failed' }, ip });
+      return res.status(400).json({ error: 'invalid_grant', error_description: 'Authorization grant is invalid.' });
     }
 
     const tokens = issueTokens(client_id, pending.userId, pending.scopes);
+    writeAudit({ userId: pending.userId, action: 'oauth.token.issue', details: { client_id, scopes: pending.scopes }, ip });
     return res.json(tokens);
   }
 
@@ -101,8 +154,11 @@ oauthPublicRouter.post('/oauth/token', (req: Request, res: Response) => {
       return res.status(400).json({ error: 'invalid_request', error_description: 'refresh_token is required' });
     }
 
-    const result = refreshTokens(refresh_token, client_id, client_secret);
+    const result = refreshTokens(refresh_token, client_id, client_secret, ip);
     if (result.error) {
+      if (result.error === 'invalid_client') {
+        logWarn(`[OAuth] Invalid client credentials on refresh for client_id=${client_id} ip=${ip ?? '-'}`);
+      }
       return res.status(result.status || 400).json({
         error: result.error,
         error_description: result.error === 'invalid_client' ? 'Invalid client credentials' : 'Refresh token is invalid or expired',
@@ -116,19 +172,25 @@ oauthPublicRouter.post('/oauth/token', (req: Request, res: Response) => {
 });
 
 // Token revocation endpoint (RFC 7009)
-oauthPublicRouter.post('/oauth/revoke', (req: Request, res: Response) => {
+oauthPublicRouter.post('/oauth/revoke', revokeLimiter, (req: Request, res: Response) => {
+  // M2: return 404 when MCP is disabled
+  if (!isAddonEnabled(ADDON_IDS.MCP)) return res.status(404).end();
+
   const body: Record<string, string> = typeof req.body === 'object' ? req.body : {};
   const { token, client_id, client_secret } = body;
+  const ip = getClientIp(req);
 
   if (!token || !client_id || !client_secret) {
     return res.status(400).json({ error: 'invalid_request', error_description: 'token, client_id, and client_secret are required' });
   }
 
   if (!authenticateClient(client_id, client_secret)) {
+    logWarn(`[OAuth] Invalid client credentials on revoke for client_id=${client_id} ip=${ip ?? '-'}`);
+    writeAudit({ userId: null, action: 'oauth.token.client_auth_failed', details: { client_id, endpoint: 'revoke' }, ip });
     return res.status(401).json({ error: 'invalid_client', error_description: 'Invalid client credentials' });
   }
 
-  revokeToken(token, client_id);
+  revokeToken(token, client_id, undefined, ip);
   // RFC 7009 §2.2: always respond 200 even if token was already revoked or not found
   return res.status(200).json({});
 });
@@ -140,19 +202,12 @@ oauthPublicRouter.post('/oauth/revoke', (req: Request, res: Response) => {
 export const oauthApiRouter = express.Router();
 
 // SPA calls this on page load to validate OAuth params before rendering consent UI
-oauthApiRouter.get('/authorize/validate', (req: Request, res: Response) => {
+oauthApiRouter.get('/authorize/validate', validateLimiter, optionalAuth, (req: Request, res: Response) => {
+  // M2 / H3: gate by addon; 404 prevents feature fingerprinting for anonymous callers
+  if (!isAddonEnabled(ADDON_IDS.MCP)) return res.status(404).end();
+
   const params = req.query as Partial<AuthorizeParams>;
-  const userId = (req as any).cookies?.trek_session
-    ? (() => {
-        try {
-          const jwt = require('jsonwebtoken');
-          const { JWT_SECRET } = require('../config');
-          const decoded = jwt.verify((req as any).cookies.trek_session, JWT_SECRET, { algorithms: ['HS256'] }) as { id: number };
-          const userRow = require('../db/database').db.prepare('SELECT id FROM users WHERE id = ?').get(decoded.id) as { id: number } | undefined;
-          return userRow?.id ?? null;
-        } catch { return null; }
-      })()
-    : null;
+  const userId = (req as OptionalAuthRequest).user?.id ?? null;
 
   const result = validateAuthorizeRequest(
     {
@@ -167,11 +222,22 @@ oauthApiRouter.get('/authorize/validate', (req: Request, res: Response) => {
     userId,
   );
 
+  // H3: when caller is unauthenticated, strip client name / allowed_scopes from the response
+  // (validateAuthorizeRequest already does this, but be explicit here)
+  if (userId === null && result.valid) {
+    return res.json({ valid: result.valid, loginRequired: true });
+  }
+
+  // For unauthenticated error cases return a generic error to prevent oracle enumeration
+  if (userId === null && !result.valid) {
+    return res.json({ valid: false, error: 'invalid_request', error_description: 'Invalid authorization request' });
+  }
+
   return res.json(result);
 });
 
-// User submits consent (approve or deny) — requires cookie auth
-oauthApiRouter.post('/authorize', authenticate, (req: Request, res: Response) => {
+// User submits consent (approve or deny) — requires cookie-only auth (M7)
+oauthApiRouter.post('/authorize', requireCookieAuth, (req: Request, res: Response) => {
   const { user } = req as AuthRequest;
   const {
     client_id, redirect_uri, scope, state,
@@ -185,6 +251,7 @@ oauthApiRouter.post('/authorize', authenticate, (req: Request, res: Response) =>
     code_challenge_method: string;
     approved: boolean;
   };
+  const ip = getClientIp(req);
 
   if (!isAddonEnabled(ADDON_IDS.MCP)) {
     return res.status(403).json({ error: 'MCP is not enabled' });
@@ -217,8 +284,8 @@ oauthApiRouter.post('/authorize', authenticate, (req: Request, res: Response) =>
 
   const scopes = validation.scopes!;
 
-  // Store consent so subsequent requests skip the screen
-  saveConsent(client_id, user.id, scopes);
+  // Store consent (union with any existing scopes)
+  saveConsent(client_id, user.id, scopes, ip);
 
   // Issue auth code
   const code = createAuthCode({
@@ -245,7 +312,7 @@ oauthApiRouter.get('/clients', authenticate, (req: Request, res: Response) => {
   return res.json({ clients: listOAuthClients(user.id) });
 });
 
-oauthApiRouter.post('/clients', authenticate, (req: Request, res: Response) => {
+oauthApiRouter.post('/clients', requireCookieAuth, (req: Request, res: Response) => {
   if (!isAddonEnabled(ADDON_IDS.MCP)) return res.status(403).json({ error: 'MCP is not enabled' });
   const { user } = req as AuthRequest;
   const { name, redirect_uris, allowed_scopes } = req.body as {
@@ -254,23 +321,23 @@ oauthApiRouter.post('/clients', authenticate, (req: Request, res: Response) => {
     allowed_scopes: string[];
   };
 
-  const result = createOAuthClient(user.id, name, redirect_uris, allowed_scopes);
+  const result = createOAuthClient(user.id, name, redirect_uris, allowed_scopes, getClientIp(req));
   if (result.error) return res.status(result.status || 400).json({ error: result.error });
   return res.status(201).json(result);
 });
 
-oauthApiRouter.post('/clients/:id/rotate', authenticate, (req: Request, res: Response) => {
+oauthApiRouter.post('/clients/:id/rotate', requireCookieAuth, (req: Request, res: Response) => {
   if (!isAddonEnabled(ADDON_IDS.MCP)) return res.status(403).json({ error: 'MCP is not enabled' });
   const { user } = req as AuthRequest;
-  const result = rotateOAuthClientSecret(user.id, req.params.id);
+  const result = rotateOAuthClientSecret(user.id, req.params.id, getClientIp(req));
   if (result.error) return res.status(result.status || 400).json({ error: result.error });
   return res.json({ client_secret: result.client_secret });
 });
 
-oauthApiRouter.delete('/clients/:id', authenticate, (req: Request, res: Response) => {
+oauthApiRouter.delete('/clients/:id', requireCookieAuth, (req: Request, res: Response) => {
   if (!isAddonEnabled(ADDON_IDS.MCP)) return res.status(403).json({ error: 'MCP is not enabled' });
   const { user } = req as AuthRequest;
-  const result = deleteOAuthClient(user.id, req.params.id);
+  const result = deleteOAuthClient(user.id, req.params.id, getClientIp(req));
   if (result.error) return res.status(result.status || 400).json({ error: result.error });
   return res.json({ success: true });
 });
@@ -283,10 +350,10 @@ oauthApiRouter.get('/sessions', authenticate, (req: Request, res: Response) => {
   return res.json({ sessions: listOAuthSessions(user.id) });
 });
 
-oauthApiRouter.delete('/sessions/:id', authenticate, (req: Request, res: Response) => {
+oauthApiRouter.delete('/sessions/:id', requireCookieAuth, (req: Request, res: Response) => {
   if (!isAddonEnabled(ADDON_IDS.MCP)) return res.status(403).json({ error: 'MCP is not enabled' });
   const { user } = req as AuthRequest;
-  const result = revokeSession(user.id, Number(req.params.id));
+  const result = revokeSession(user.id, Number(req.params.id), getClientIp(req));
   if (result.error) return res.status(result.status || 400).json({ error: result.error });
   return res.json({ success: true });
 });

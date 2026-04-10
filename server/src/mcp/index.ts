@@ -9,19 +9,9 @@ import { isAddonEnabled } from '../services/adminService';
 import { ADDON_IDS } from '../addons';
 import { registerResources } from './resources';
 import { registerTools } from './tools';
+import { McpSession, sessions, revokeUserSessions, revokeUserSessionsForClient } from './sessionManager';
 
-interface McpSession {
-  server: McpServer;
-  transport: StreamableHTTPServerTransport;
-  userId: number;
-  /** null = static trek_ token or JWT (full access); string[] = OAuth 2.1 scopes */
-  scopes: string[] | null;
-  /** true when authenticated via static trek_ token — triggers deprecation prompt */
-  isStaticToken: boolean;
-  lastActivity: number;
-}
-
-const sessions = new Map<string, McpSession>();
+export { revokeUserSessions, revokeUserSessionsForClient };
 
 const SESSION_TTL_MS = 60 * 60 * 1000; // 1 hour
 const sessionParsed = Number.parseInt(process.env.MCP_MAX_SESSION_PER_USER ?? "");
@@ -83,31 +73,38 @@ interface VerifyTokenResult {
   user: User;
   /** null = full access (static token or JWT); string[] = OAuth 2.1 scoped access */
   scopes: string[] | null;
+  /** OAuth client_id when authenticated via OAuth 2.1; null otherwise */
+  clientId: string | null;
   isStaticToken: boolean;
 }
 
 function verifyToken(authHeader: string | undefined): VerifyTokenResult | null {
-  const token = authHeader && authHeader.split(' ')[1];
-  if (!token) return null;
+  if (!authHeader) return null;
+  // M8: strictly require "Bearer" scheme (RFC 6750)
+  const spaceIdx = authHeader.indexOf(' ');
+  if (spaceIdx === -1) return null;
+  const scheme = authHeader.slice(0, spaceIdx);
+  const token  = authHeader.slice(spaceIdx + 1);
+  if (scheme.toLowerCase() !== 'bearer' || !token) return null;
 
   // OAuth 2.1 access token (trekoa_...)
   if (token.startsWith('trekoa_')) {
     const result = getUserByAccessToken(token);
     if (!result) return null;
-    return { user: result.user, scopes: result.scopes, isStaticToken: false };
+    return { user: result.user, scopes: result.scopes, clientId: result.clientId, isStaticToken: false };
   }
 
   // Long-lived static MCP token (trek_...) — full access + deprecation notice
   if (token.startsWith('trek_')) {
     const user = verifyMcpToken(token);
     if (!user) return null;
-    return { user, scopes: null, isStaticToken: true };
+    return { user, scopes: null, clientId: null, isStaticToken: true };
   }
 
   // Short-lived JWT (TREK web session used directly) — full access, no notice
   const user = verifyJwtToken(token);
   if (!user) return null;
-  return { user, scopes: null, isStaticToken: false };
+  return { user, scopes: null, clientId: null, isStaticToken: false };
 }
 
 export async function mcpHandler(req: Request, res: Response): Promise<void> {
@@ -121,7 +118,7 @@ export async function mcpHandler(req: Request, res: Response): Promise<void> {
     res.status(401).json({ error: 'Access token required' });
     return;
   }
-  const { user, scopes, isStaticToken } = tokenResult;
+  const { user, scopes, clientId, isStaticToken } = tokenResult;
 
   if (isRateLimited(user.id)) {
     res.status(429).json({ error: 'Too many requests. Please slow down.' });
@@ -174,13 +171,13 @@ export async function mcpHandler(req: Request, res: Response): Promise<void> {
       prompts: { listChanged: true },
     },
   });
-  registerResources(server, user.id);
+  registerResources(server, user.id, scopes);
   registerTools(server, user.id, scopes, isStaticToken);
 
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
     onsessioninitialized: (sid) => {
-      sessions.set(sid, { server, transport, userId: user.id, scopes, isStaticToken, lastActivity: Date.now() });
+      sessions.set(sid, { server, transport, userId: user.id, scopes, clientId, isStaticToken, lastActivity: Date.now() });
       const authMethod = isStaticToken ? 'static-token' : scopes ? `oauth(${scopes.join(',')})` : 'jwt';
       console.log(`[MCP] Session ${sid} created for user ${user.id} [${authMethod}]. Active sessions: ${sessions.size}`);
     },
@@ -196,17 +193,6 @@ export async function mcpHandler(req: Request, res: Response): Promise<void> {
     console.error('[MCP] transport.handleRequest error:', err);
     if (!res.headersSent) {
       res.status(500).json({ error: 'Internal MCP error', detail: String(err) });
-    }
-  }
-}
-
-/** Terminate all active MCP sessions for a specific user (e.g. on token revocation). */
-export function revokeUserSessions(userId: number): void {
-  for (const [sid, session] of sessions) {
-    if (session.userId === userId) {
-      try { session.server.close(); } catch { /* ignore */ }
-      try { session.transport.close(); } catch { /* ignore */ }
-      sessions.delete(sid);
     }
   }
 }

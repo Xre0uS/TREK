@@ -926,6 +926,13 @@ function runMigrations(db: Database.Database): void {
         CREATE UNIQUE INDEX IF NOT EXISTS idx_oauth_tokens_refresh ON oauth_tokens(refresh_token_hash);
       `);
     },
+    // Migration: Refresh-token rotation chain tracking for replay detection
+    () => {
+      db.exec(`
+        ALTER TABLE oauth_tokens ADD COLUMN parent_token_id INTEGER REFERENCES oauth_tokens(id);
+        CREATE INDEX IF NOT EXISTS idx_oauth_tokens_parent ON oauth_tokens(parent_token_id);
+      `);
+    },
   ];
 
   if (currentVersion < migrations.length) {
