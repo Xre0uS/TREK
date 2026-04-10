@@ -92,29 +92,32 @@ export default function AdminMcpTokensPanel() {
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-4 px-4 py-2.5 text-xs font-medium border-b"
+              <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-6 px-4 py-2.5 text-xs font-medium border-b"
                 style={{ color: 'var(--text-tertiary)', borderColor: 'var(--border-primary)', background: 'var(--bg-secondary)' }}>
                 <span>{t('admin.oauthSessions.clientName')}</span>
                 <span>{t('admin.oauthSessions.owner')}</span>
-                <span>{t('admin.oauthSessions.scopes')}</span>
                 <span className="text-right">{t('admin.oauthSessions.created')}</span>
                 <span></span>
               </div>
               {sessions.map((session, i) => (
                 <div key={session.id}
-                  className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-x-4 px-4 py-3"
+                  className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-6 px-4 py-3"
                   style={{ borderBottom: i < sessions.length - 1 ? '1px solid var(--border-primary)' : undefined }}>
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{session.client_name}</p>
-                    <p className="text-xs font-mono mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{session.client_id}</p>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {session.scopes.map(scope => (
+                        <span key={scope} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-mono"
+                          style={{ background: 'var(--bg-secondary)', color: 'var(--text-tertiary)', border: '1px solid var(--border-primary)' }}>
+                          {scope}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                   <div className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
                     <User className="w-3.5 h-3.5 flex-shrink-0" />
                     <span className="whitespace-nowrap">{session.username}</span>
                   </div>
-                  <span className="text-xs whitespace-nowrap" style={{ color: 'var(--text-tertiary)' }}>
-                    {session.scopes.join(', ')}
-                  </span>
                   <span className="text-xs whitespace-nowrap text-right" style={{ color: 'var(--text-tertiary)' }}>
                     {new Date(session.created_at).toLocaleDateString(locale)}
                   </span>
