@@ -166,8 +166,8 @@ services:
       # - DEMO_MODE=false # Enable demo mode (resets data hourly)
       # - ADMIN_EMAIL=admin@trek.local # Initial admin e-mail — only used on first boot when no users exist
       # - ADMIN_PASSWORD=changeme      # Initial admin password — only used on first boot when no users exist
-      # - MCP_RATE_LIMIT=60 # Max MCP API requests per user per minute (default: 60)
-      # - MCP_MAX_SESSION_PER_USER=5 # Max concurrent MCP sessions per user (default: 5)
+      # - MCP_RATE_LIMIT=300 # Max MCP API requests per user per minute (default: 300)
+      # - MCP_MAX_SESSION_PER_USER=20 # Max concurrent MCP sessions per user (default: 20)
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
@@ -311,8 +311,8 @@ trek.yourdomain.com {
 | `ADMIN_PASSWORD` | Password for the first admin account created on initial boot. Must be set together with `ADMIN_EMAIL`. | random |
 | **Other** | | |
 | `DEMO_MODE` | Enable demo mode (hourly data resets) | `false` |
-| `MCP_RATE_LIMIT` | Max MCP API requests per user per minute | `60` |
-| `MCP_MAX_SESSION_PER_USER` | Max concurrent MCP sessions per user | `5` |
+| `MCP_RATE_LIMIT` | Max MCP API requests per user per minute | `300` |
+| `MCP_MAX_SESSION_PER_USER` | Max concurrent MCP sessions per user | `20` |
 
 ## Optional API Keys
 
