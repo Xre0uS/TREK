@@ -111,12 +111,18 @@ export function getPublicJourney(token: string) {
     (photosByEntry[p.entry_id] ||= []).push(p);
   }
 
-  const enrichedEntries = entries.map(e => ({
-    ...e,
-    tags: e.tags ? JSON.parse(e.tags) : [],
-    pros_cons: e.pros_cons ? JSON.parse(e.pros_cons) : null,
-    photos: photosByEntry[e.id] || [],
-  }));
+  const enrichedEntries = entries
+    .filter(e => {
+      // hide empty Gallery entries (no photos, no story)
+      if (e.title === 'Gallery' && !e.story && !(photosByEntry[e.id]?.length)) return false;
+      return true;
+    })
+    .map(e => ({
+      ...e,
+      tags: e.tags ? JSON.parse(e.tags) : [],
+      pros_cons: e.pros_cons ? JSON.parse(e.pros_cons) : null,
+      photos: photosByEntry[e.id] || [],
+    }));
 
   // Stats
   const stats = {

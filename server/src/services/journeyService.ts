@@ -114,15 +114,21 @@ export function getJourneyFull(journeyId: number, userId: number) {
     (photosByEntry[p.entry_id] ||= []).push(p);
   }
 
-  const enrichedEntries = entries.map(e => ({
-    ...e,
-    tags: e.tags ? JSON.parse(e.tags) : [],
-    pros_cons: e.pros_cons ? JSON.parse(e.pros_cons) : null,
-    photos: photosByEntry[e.id] || [],
-    source_trip_name: e.source_trip_id
-      ? (db.prepare('SELECT title FROM trips WHERE id = ?').get(e.source_trip_id) as { title: string } | undefined)?.title || null
-      : null,
-  }));
+  const enrichedEntries = entries
+    .filter(e => {
+      // hide empty Gallery entries (no photos, no story)
+      if (e.title === 'Gallery' && !e.story && !(photosByEntry[e.id]?.length)) return false;
+      return true;
+    })
+    .map(e => ({
+      ...e,
+      tags: e.tags ? JSON.parse(e.tags) : [],
+      pros_cons: e.pros_cons ? JSON.parse(e.pros_cons) : null,
+      photos: photosByEntry[e.id] || [],
+      source_trip_name: e.source_trip_id
+        ? (db.prepare('SELECT title FROM trips WHERE id = ?').get(e.source_trip_id) as { title: string } | undefined)?.title || null
+        : null,
+    }));
 
   // linked trips
   const trips = db.prepare(`
@@ -552,24 +558,16 @@ export function deleteEntry(entryId: number, userId: number): boolean {
   if (!entry) return false;
   if (!canEdit(entry.journey_id, userId)) return false;
 
-  // move photos to hidden Gallery entry so they stay in the gallery
-  const hasPhotos = db.prepare('SELECT 1 FROM journey_photos WHERE entry_id = ?').get(entryId);
-  if (hasPhotos) {
-    let gallery = db.prepare(
-      "SELECT id FROM journey_entries WHERE journey_id = ? AND title = 'Gallery' AND id != ?"
-    ).get(entry.journey_id, entryId) as { id: number } | undefined;
-    if (!gallery) {
-      const now = ts();
-      const res = db.prepare(`
-        INSERT INTO journey_entries (journey_id, author_id, type, title, entry_date, sort_order, created_at, updated_at)
-        VALUES (?, ?, 'entry', 'Gallery', ?, 999, ?, ?)
-      `).run(entry.journey_id, entry.author_id, entry.entry_date, now, now);
-      gallery = { id: Number(res.lastInsertRowid) };
-    }
-    db.prepare('UPDATE journey_photos SET entry_id = ? WHERE entry_id = ?').run(gallery.id, entryId);
-  }
-
+  // delete photos along with the entry — no more orphan Gallery entries
+  db.prepare('DELETE FROM journey_photos WHERE entry_id = ?').run(entryId);
   db.prepare('DELETE FROM journey_entries WHERE id = ?').run(entryId);
+
+  // clean up any empty Gallery entries in this journey
+  db.prepare(`
+    DELETE FROM journey_entries WHERE journey_id = ? AND title = 'Gallery'
+    AND id NOT IN (SELECT DISTINCT entry_id FROM journey_photos)
+  `).run(entry.journey_id);
+
   broadcastJourneyEvent(entry.journey_id, 'journey:entry:deleted', { entryId }, userId);
   return true;
 }
@@ -673,6 +671,16 @@ export function deletePhoto(photoId: number, userId: number): (JourneyPhoto & { 
   if (!canEdit(photo.journey_id, userId)) return null;
 
   db.prepare('DELETE FROM journey_photos WHERE id = ?').run(photoId);
+
+  // clean up empty Gallery entries left behind
+  const remaining = db.prepare('SELECT 1 FROM journey_photos WHERE entry_id = ?').get(photo.entry_id);
+  if (!remaining) {
+    const entry = db.prepare('SELECT * FROM journey_entries WHERE id = ?').get(photo.entry_id) as JourneyEntry | undefined;
+    if (entry && entry.title === 'Gallery' && !entry.story) {
+      db.prepare('DELETE FROM journey_entries WHERE id = ?').run(photo.entry_id);
+    }
+  }
+
   return photo;
 }
 
