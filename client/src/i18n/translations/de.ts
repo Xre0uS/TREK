@@ -1,6 +1,8 @@
 const de: Record<string, string | { name: string; category: string }[]> = {
   // Allgemein
   'common.save': 'Speichern',
+  'common.showMore': 'Mehr anzeigen',
+  'common.showLess': 'Weniger anzeigen',
   'common.cancel': 'Abbrechen',
   'common.delete': 'Löschen',
   'common.edit': 'Bearbeiten',

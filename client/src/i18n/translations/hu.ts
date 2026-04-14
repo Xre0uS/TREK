@@ -1,6 +1,8 @@
 const hu: Record<string, string | { name: string; category: string }[]> = {
   // Általános
   'common.save': 'Mentés',
+  'common.showMore': 'Továbbiak',
+  'common.showLess': 'Kevesebb',
   'common.cancel': 'Mégse',
   'common.delete': 'Törlés',
   'common.edit': 'Szerkesztés',

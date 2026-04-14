@@ -1,6 +1,8 @@
 const zh: Record<string, string> = {
   // Common
   'common.save': '保存',
+  'common.showMore': '显示更多',
+  'common.showLess': '收起',
   'common.cancel': '取消',
   'common.delete': '删除',
   'common.edit': '编辑',

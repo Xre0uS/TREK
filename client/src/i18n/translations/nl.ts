@@ -1,6 +1,8 @@
 const nl: Record<string, string> = {
   // Common
   'common.save': 'Opslaan',
+  'common.showMore': 'Meer tonen',
+  'common.showLess': 'Minder tonen',
   'common.cancel': 'Annuleren',
   'common.delete': 'Verwijderen',
   'common.edit': 'Bewerken',

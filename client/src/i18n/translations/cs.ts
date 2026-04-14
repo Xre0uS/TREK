@@ -1,6 +1,8 @@
 const cs: Record<string, string | { name: string; category: string }[]> = {
   // Společné (Common)
   'common.save': 'Uložit',
+  'common.showMore': 'Zobrazit více',
+  'common.showLess': 'Zobrazit méně',
   'common.cancel': 'Zrušit',
   'common.delete': 'Smazat',
   'common.edit': 'Upravit',

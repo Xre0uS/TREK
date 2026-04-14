@@ -1,6 +1,8 @@
 const fr: Record<string, string> = {
   // Common
   'common.save': 'Enregistrer',
+  'common.showMore': 'Voir plus',
+  'common.showLess': 'Voir moins',
   'common.cancel': 'Annuler',
   'common.delete': 'Supprimer',
   'common.edit': 'Modifier',

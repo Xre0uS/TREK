@@ -992,6 +992,7 @@ function GalleryView({ entries, journeyId, userId, trips, onPhotoClick, onRefres
 // ── Expandable Story ─────────────────────────────────────────────────────
 
 function ExpandableStory({ story }: { story: string }) {
+  const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
   const [clamped, setClamped] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -1017,16 +1018,24 @@ function ExpandableStory({ story }: { story: string }) {
         onClick={() => { if (clamped || expanded) setExpanded(e => !e) }}
         className={`text-[13px] text-zinc-700 dark:text-zinc-300 leading-relaxed ${
           expanded ? '' : 'line-clamp-3 md:line-clamp-[9]'
-        } ${clamped || expanded ? 'cursor-pointer md:cursor-auto' : ''}`}
+        } ${clamped || expanded ? 'cursor-pointer' : ''}`}
       >
         <JournalBody text={story} />
       </div>
       {clamped && !expanded && (
         <button
           onClick={() => setExpanded(true)}
-          className="md:hidden mt-2 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-[10px] font-medium text-zinc-500 dark:text-zinc-400 active:scale-95 transition-transform"
+          className="mt-2 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-[10px] font-medium text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 active:scale-95 transition-all"
         >
-          Read more <ChevronRight size={10} />
+          {t('common.showMore')} <ChevronRight size={10} />
+        </button>
+      )}
+      {expanded && (
+        <button
+          onClick={() => setExpanded(false)}
+          className="mt-2 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-[10px] font-medium text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 active:scale-95 transition-all"
+        >
+          {t('common.showLess')} <ChevronRight size={10} className="rotate-[-90deg]" />
         </button>
       )}
     </div>

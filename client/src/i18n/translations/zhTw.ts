@@ -1,6 +1,8 @@
 const zhTw: Record<string, string> = {
   // Common
   'common.save': '儲存',
+  'common.showMore': '顯示更多',
+  'common.showLess': '收起',
   'common.cancel': '取消',
   'common.delete': '刪除',
   'common.edit': '編輯',

@@ -5,6 +5,8 @@ const ar: Record<string, string | { name: string; category: string }[]> = {
 
   // Common
   'common.save': 'حفظ',
+  'common.showMore': 'عرض المزيد',
+  'common.showLess': 'عرض أقل',
   'common.cancel': 'إلغاء',
   'common.delete': 'حذف',
   'common.edit': 'تعديل',

@@ -1,6 +1,8 @@
 const ru: Record<string, string> = {
   // Common
   'common.save': 'Сохранить',
+  'common.showMore': 'Показать больше',
+  'common.showLess': 'Показать меньше',
   'common.cancel': 'Отмена',
   'common.delete': 'Удалить',
   'common.edit': 'Редактировать',
