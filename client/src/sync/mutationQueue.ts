@@ -36,6 +36,9 @@ export function generateUUID(): string {
 }
 
 let _flushing = false
+// Monotonically increasing timestamp so same-millisecond enqueues
+// still get a deterministic FIFO order when sorted by createdAt.
+let _lastTs = 0
 
 export const mutationQueue = {
   /**
@@ -45,11 +48,13 @@ export const mutationQueue = {
   async enqueue(
     mutation: Omit<QueuedMutation, 'status' | 'attempts' | 'createdAt' | 'lastError'>,
   ): Promise<string> {
+    const now = Date.now()
+    _lastTs = now > _lastTs ? now : _lastTs + 1
     const item: QueuedMutation = {
       ...mutation,
       status: 'pending',
       attempts: 0,
-      createdAt: Date.now(),
+      createdAt: _lastTs,
       lastError: null,
     }
     await offlineDb.mutationQueue.put(item)
@@ -155,8 +160,9 @@ export const mutationQueue = {
       .count()
   },
 
-  /** Reset internal flushing flag — useful in tests. */
+  /** Reset internal flushing flag and timestamp counter — useful in tests. */
   _resetFlushing(): void {
     _flushing = false
+    _lastTs = 0
   },
 }
