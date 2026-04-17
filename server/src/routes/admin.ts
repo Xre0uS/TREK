@@ -201,6 +201,25 @@ router.put('/bag-tracking', (req: Request, res: Response) => {
   res.json(result);
 });
 
+// ── Places Photos ───────────────────────────────────────────────────────
+
+router.get('/places-photos', (_req: Request, res: Response) => {
+  res.json(svc.getPlacesPhotos());
+});
+
+router.put('/places-photos', (req: Request, res: Response) => {
+  if (typeof req.body.enabled !== 'boolean') return res.status(400).json({ error: 'enabled must be a boolean' });
+  const result = svc.updatePlacesPhotos(req.body.enabled);
+  const authReq = req as AuthRequest;
+  writeAudit({
+    userId: authReq.user.id,
+    action: 'admin.places_photos',
+    ip: getClientIp(req),
+    details: { enabled: result.enabled },
+  });
+  res.json(result);
+});
+
 // ── Collab Features ───────────────────────────────────────────────────────
 
 router.get('/collab-features', (_req: Request, res: Response) => {

@@ -459,6 +459,18 @@ export function updateBagTracking(enabled: boolean) {
   return { enabled: !!enabled };
 }
 
+// ── Places Photos ─────────────────────────────────────────────────────────
+
+export function getPlacesPhotos() {
+  const row = db.prepare("SELECT value FROM app_settings WHERE key = 'places_photos_enabled'").get() as { value: string } | undefined;
+  return { enabled: row?.value !== 'false' };
+}
+
+export function updatePlacesPhotos(enabled: boolean) {
+  db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('places_photos_enabled', ?)").run(enabled ? 'true' : 'false');
+  return { enabled: !!enabled };
+}
+
 // ── Collab Features ───────────────────────────────────────────────────────
 
 const COLLAB_FEATURE_KEYS = ['collab_chat_enabled', 'collab_notes_enabled', 'collab_polls_enabled', 'collab_whatsnext_enabled'] as const;

@@ -549,6 +549,8 @@ const de: Record<string, string | { name: string; category: string }[]> = {
   'admin.fileTypesFormat': 'Kommagetrennte Endungen (z.B. jpg,png,pdf,doc). Verwende * um alle Typen zu erlauben.',
   'admin.fileTypesSaved': 'Dateityp-Einstellungen gespeichert',
 
+  'admin.placesPhotos.title': 'Ortsfotos',
+  'admin.placesPhotos.subtitle': 'Fotos von der Google Places API laden. Deaktivieren, um API-Kontingent zu sparen. Wikimedia-Fotos sind davon nicht betroffen.',
   // Packing Templates & Bag Tracking
   'admin.bagTracking.title': 'Gepäck-Tracking',
   'admin.bagTracking.subtitle': 'Gewicht und Gepäckstück-Zuordnung für Packlisteneinträge aktivieren',

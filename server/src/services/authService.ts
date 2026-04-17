@@ -229,6 +229,8 @@ export function getAppConfig(authenticatedUser: { id: number } | null) {
   const activeChannels = notifChannelsRaw === 'none' ? [] : notifChannelsRaw.split(',').map((c: string) => c.trim()).filter(Boolean);
   const hasWebhookEnabled = activeChannels.includes('webhook');
   const tripRemindersEnabled = tripReminderSetting !== 'false';
+  const placesPhotosSetting = (db.prepare("SELECT value FROM app_settings WHERE key = 'places_photos_enabled'").get() as { value: string } | undefined)?.value;
+  const placesPhotosEnabled = placesPhotosSetting !== 'false';
   const setupComplete = userCount > 0 && !(db.prepare("SELECT id FROM users WHERE role = 'admin' AND must_change_password = 1 LIMIT 1").get());
 
   return {
@@ -258,6 +260,7 @@ export function getAppConfig(authenticatedUser: { id: number } | null) {
     notification_channels: activeChannels,
     available_channels: { email: hasSmtpHost, webhook: hasWebhookEnabled, inapp: true },
     trip_reminders_enabled: tripRemindersEnabled,
+    places_photos_enabled: placesPhotosEnabled,
     permissions: authenticatedUser ? getAllPermissions() : undefined,
     dev_mode: process.env.NODE_ENV === 'development',
   };
