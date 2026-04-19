@@ -270,6 +270,17 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar({
   const inputRef = useRef(null)
   const dragDataRef = useRef(null)
   const initedTransportIds = useRef(new Set<number>()) // Speichert Drag-Daten als Backup (dataTransfer geht bei Re-Render verloren)
+  // Remember which assignment we last auto-scrolled into view so we don't
+  // keep yanking the user back whenever they scroll away while the same
+  // place stays selected.
+  const lastAutoScrolledIdRef = useRef<number | null>(null)
+  useEffect(() => {
+    // Reset the scroll-lock whenever selection moves, so the next selected
+    // row triggers a fresh scroll-into-view on its ref.
+    if (!selectedAssignmentId && !selectedPlaceId) {
+      lastAutoScrolledIdRef.current = null
+    }
+  }, [selectedAssignmentId, selectedPlaceId])
 
   const currency = trip?.currency || 'EUR'
 
@@ -1131,7 +1142,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar({
                   display: 'flex', alignItems: 'center', gap: 10,
                   padding: '11px 14px 11px 16px',
                   cursor: 'pointer',
-                  background: isDragTarget ? 'rgba(17,24,39,0.07)' : (isSelected ? 'var(--bg-tertiary)' : 'transparent'),
+                  background: isDragTarget ? 'rgba(17,24,39,0.07)' : (isSelected ? 'var(--bg-selected)' : 'transparent'),
                   transition: 'background 0.12s',
                   userSelect: 'none',
                   outline: isDragTarget ? '2px dashed rgba(17,24,39,0.25)' : 'none',
@@ -1439,6 +1450,21 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar({
                                 handleMergedDrop(day.id, 'note', Number(noteId), 'place', assignment.id)
                               }
                             }}
+                            ref={el => {
+                              // Auto-scroll the selected row into view — but only on
+                              // the transition "just became selected". Once we've
+                              // scrolled for this assignment id, we won't scroll
+                              // again until selection actually moves somewhere else.
+                              if (el && isPlaceSelected && lastAutoScrolledIdRef.current !== assignment.id) {
+                                const rect = el.getBoundingClientRect()
+                                const nearTop = rect.top < 80
+                                const nearBottom = rect.bottom > window.innerHeight - 80
+                                if (nearTop || nearBottom) {
+                                  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                                }
+                                lastAutoScrolledIdRef.current = assignment.id
+                              }
+                            }}
                             onDragEnd={() => { setDraggingId(null); setDragOverDayId(null); setDropTargetKey(null); dragDataRef.current = null }}
                             onClick={() => { onPlaceClick(isPlaceSelected ? null : place.id, isPlaceSelected ? null : assignment.id); if (!isPlaceSelected) onSelectDay(day.id, true) }}
                             onContextMenu={e => ctxMenu.open(e, [
@@ -1469,7 +1495,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar({
                               cursor: 'pointer',
                               background: lockedIds.has(assignment.id)
                                 ? 'rgba(220,38,38,0.08)'
-                                : isPlaceSelected ? 'var(--bg-hover)' : 'transparent',
+                                : isPlaceSelected ? 'var(--bg-selected)' : 'transparent',
                               borderLeft: lockedIds.has(assignment.id)
                                 ? '3px solid #dc2626'
                                 : '3px solid transparent',

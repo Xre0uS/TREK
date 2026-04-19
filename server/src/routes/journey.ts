@@ -257,6 +257,18 @@ router.post('/:id/entries', authenticate, (req: Request, res: Response) => {
   res.status(201).json(entry);
 });
 
+router.put('/:id/entries/reorder', authenticate, (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const orderedIds = (req.body || {}).orderedIds;
+  if (!Array.isArray(orderedIds) || !orderedIds.every(id => Number.isFinite(Number(id)))) {
+    return res.status(400).json({ error: 'orderedIds must be an array of numbers' });
+  }
+  if (!svc.reorderEntries(Number(req.params.id), authReq.user.id, orderedIds.map(Number), req.headers['x-socket-id'] as string)) {
+    return res.status(403).json({ error: 'Not allowed' });
+  }
+  res.json({ success: true });
+});
+
 // ── Contributors ─────────────────────────────────────────────────────────
 
 router.post('/:id/contributors', authenticate, (req: Request, res: Response) => {

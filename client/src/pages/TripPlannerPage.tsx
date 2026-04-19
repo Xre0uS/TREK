@@ -4,7 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useTripStore } from '../store/tripStore'
 import { useCanDo } from '../store/permissionsStore'
 import { useSettingsStore } from '../store/settingsStore'
-import { MapView } from '../components/Map/MapView'
+import { MapViewAuto as MapView } from '../components/Map/MapViewAuto'
 import { getCached, fetchPhoto } from '../services/photoService'
 import DayPlanSidebar from '../components/Planner/DayPlanSidebar'
 import PlacesSidebar from '../components/Planner/PlacesSidebar'
@@ -413,10 +413,39 @@ export default function TripPlannerPage(): React.ReactElement | null {
   }, [selectAssignment, setSelectedPlaceId])
 
   const handleMarkerClick = useCallback((placeId) => {
-    const opening = placeId !== undefined
-    setSelectedPlaceId(prev => prev === placeId ? null : placeId)
-    if (opening) { setLeftCollapsed(false); setRightCollapsed(false) }
-  }, [])
+    if (placeId === undefined) {
+      setSelectedPlaceId(null)
+      return
+    }
+    // Find every assignment for this place (same place can sit on several
+    // days / be planned twice in one day). Cycle through them on repeated
+    // marker clicks so the sidebar highlight jumps to the next occurrence
+    // instead of leaving the user confused.
+    const allAssignments = Object.values(useTripStore.getState().assignments || {}).flat()
+    const matching = allAssignments.filter(a => a?.place?.id === placeId)
+
+    if (matching.length === 0) {
+      setSelectedPlaceId(prev => prev === placeId ? null : placeId)
+    } else if (matching.length === 1) {
+      const only = matching[0]
+      if (selectedAssignmentId === only.id) {
+        setSelectedPlaceId(null)
+      } else {
+        selectAssignment(only.id, placeId)
+      }
+    } else {
+      const currentIdx = matching.findIndex(a => a.id === selectedAssignmentId)
+      const nextIdx = currentIdx === -1 ? 0 : currentIdx + 1
+      if (nextIdx >= matching.length) {
+        // cycled past the last occurrence — clear selection so the next
+        // click starts fresh at occurrence 0.
+        setSelectedPlaceId(null)
+      } else {
+        selectAssignment(matching[nextIdx].id, placeId)
+      }
+    }
+    setLeftCollapsed(false); setRightCollapsed(false)
+  }, [selectAssignment, selectedAssignmentId, setSelectedPlaceId])
 
   const handleMapClick = useCallback(() => {
     setSelectedPlaceId(null)

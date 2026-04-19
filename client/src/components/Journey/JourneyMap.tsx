@@ -183,6 +183,12 @@ const JourneyMap = forwardRef<JourneyMapHandle, Props>(function JourneyMap(
       maxZoom: 18,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       referrerPolicy: 'strict-origin-when-cross-origin',
+      // Leaflet defaults updateWhenIdle:true on mobile (waits for pan to settle
+      // before loading tiles). On the journey mobile combined view we flyTo
+      // constantly when switching cards, so tiles lag visibly — force eager
+      // updates and keep a larger ring of off-screen tiles ready.
+      updateWhenIdle: false,
+      keepBuffer: 4,
     } as any).addTo(map)
 
     const items = buildMarkerItems(entries)
@@ -244,7 +250,7 @@ const JourneyMap = forwardRef<JourneyMapHandle, Props>(function JourneyMap(
         map.invalidateSize()
         if (allCoords.length > 0) {
           const pb = paddingBottom || 50
-          map.fitBounds(L.latLngBounds(allCoords), { paddingTopLeft: [50, 50], paddingBottomRight: [50, pb], maxZoom: 14 })
+          map.fitBounds(L.latLngBounds(allCoords), { paddingTopLeft: [50, 50], paddingBottomRight: [50, pb], maxZoom: 16 })
         } else {
           map.setView([30, 0], 2)
         }

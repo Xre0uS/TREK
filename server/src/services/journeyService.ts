@@ -598,6 +598,31 @@ export function updateEntry(entryId: number, userId: number, data: Partial<{
   return updated;
 }
 
+// Reorder entries (typically within a single day). Caller passes the new
+// desired order of ids; each entry's sort_order is set to its index in the
+// array. Only entries owned by this journey are accepted.
+export function reorderEntries(journeyId: number, userId: number, orderedIds: number[], sid?: string): boolean {
+  if (!canEdit(journeyId, userId)) return false;
+  if (!orderedIds.length) return true;
+
+  const placeholders = orderedIds.map(() => '?').join(',');
+  const rows = db
+    .prepare(`SELECT id FROM journey_entries WHERE id IN (${placeholders}) AND journey_id = ?`)
+    .all(...orderedIds, journeyId) as { id: number }[];
+  if (rows.length !== orderedIds.length) return false;
+
+  const now = ts();
+  const update = db.prepare('UPDATE journey_entries SET sort_order = ?, updated_at = ? WHERE id = ?');
+  const tx = db.transaction(() => {
+    orderedIds.forEach((id, index) => update.run(index, now, id));
+    db.prepare('UPDATE journeys SET updated_at = ? WHERE id = ?').run(now, journeyId);
+  });
+  tx();
+
+  broadcastJourneyEvent(journeyId, 'journey:entries:reordered', { orderedIds }, sid);
+  return true;
+}
+
 export function deleteEntry(entryId: number, userId: number, sid?: string): boolean {
   const entry = db.prepare('SELECT * FROM journey_entries WHERE id = ?').get(entryId) as JourneyEntry | undefined;
   if (!entry) return false;

@@ -32,6 +32,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     temperature_unit: 'fahrenheit',
     time_format: '12h',
     show_place_description: false,
+    map_provider: 'leaflet',
+    mapbox_access_token: '',
+    mapbox_style: 'mapbox://styles/mapbox/standard',
+    mapbox_3d_enabled: true,
+    mapbox_quality_mode: false,
   },
   isLoaded: false,
 

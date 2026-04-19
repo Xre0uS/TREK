@@ -343,6 +343,7 @@ export const journeyApi = {
   createEntry: (id: number, data: Record<string, unknown>) => apiClient.post(`/journeys/${id}/entries`, data).then(r => r.data),
   updateEntry: (entryId: number, data: Record<string, unknown>) => apiClient.patch(`/journeys/entries/${entryId}`, data).then(r => r.data),
   deleteEntry: (entryId: number) => apiClient.delete(`/journeys/entries/${entryId}`).then(r => r.data),
+  reorderEntries: (journeyId: number, orderedIds: number[]) => apiClient.put(`/journeys/${journeyId}/entries/reorder`, { orderedIds }).then(r => r.data),
 
   // Photos
   uploadPhotos: (entryId: number, formData: FormData) => apiClient.post(`/journeys/entries/${entryId}/photos`, formData, { headers: { 'Content-Type': undefined as any } }).then(r => r.data),

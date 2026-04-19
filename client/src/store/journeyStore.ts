@@ -100,6 +100,7 @@ interface JourneyState {
   createEntry: (journeyId: number, data: Record<string, unknown>) => Promise<JourneyEntry>
   updateEntry: (entryId: number, data: Record<string, unknown>) => Promise<void>
   deleteEntry: (entryId: number) => Promise<void>
+  reorderEntries: (journeyId: number, orderedIds: number[]) => Promise<void>
 
   uploadPhotos: (entryId: number, formData: FormData) => Promise<JourneyPhoto[]>
   deletePhoto: (photoId: number) => Promise<void>
@@ -185,6 +186,35 @@ export const useJourneyStore = create<JourneyState>((set, get) => ({
       if (!s.current) return s
       return { current: { ...s.current, entries: s.current.entries.filter(e => e.id !== entryId) } }
     })
+  },
+
+  reorderEntries: async (journeyId, orderedIds) => {
+    // Optimistic: push the new sort_order and re-sort locally so the UI
+    // updates immediately. Server mirrors the same ordering. On failure we
+    // reload the journey to recover the authoritative state.
+    const prev = get().current
+    set(s => {
+      if (!s.current || s.current.id !== journeyId) return s
+      const sortMap = new Map(orderedIds.map((id, idx) => [id, idx]))
+      const entries = s.current.entries.map(e =>
+        sortMap.has(e.id) ? { ...e, sort_order: sortMap.get(e.id)! } : e
+      )
+      entries.sort((a, b) => {
+        if (a.entry_date !== b.entry_date) return a.entry_date.localeCompare(b.entry_date)
+        const atime = a.entry_time || ''
+        const btime = b.entry_time || ''
+        if (atime !== btime) return atime.localeCompare(btime)
+        return (a.sort_order || 0) - (b.sort_order || 0)
+      })
+      return { current: { ...s.current, entries } }
+    })
+    try {
+      await journeyApi.reorderEntries(journeyId, orderedIds)
+    } catch (err) {
+      // Roll back to last-known-good state.
+      if (prev && prev.id === journeyId) set({ current: prev })
+      throw err
+    }
   },
 
   uploadPhotos: async (entryId, formData) => {

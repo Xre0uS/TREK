@@ -214,6 +214,11 @@ export interface Settings {
   route_calculation?: boolean
   blur_booking_codes?: boolean
   map_booking_labels?: boolean
+  map_provider?: 'leaflet' | 'mapbox-gl'
+  mapbox_access_token?: string
+  mapbox_style?: string
+  mapbox_3d_enabled?: boolean
+  mapbox_quality_mode?: boolean
 }
 
 export interface AssignmentsMap {

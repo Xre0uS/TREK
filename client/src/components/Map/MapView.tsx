@@ -278,93 +278,76 @@ function RouteLabel({ midpoint, walkingText, drivingText }: RouteLabelProps) {
 // Module-level photo cache shared with PlaceAvatar
 import { getCached, isLoading, fetchPhoto, onThumbReady, getAllThumbs } from '../../services/photoService'
 import { useAuthStore } from '../../store/authStore'
+import { useGeolocation } from '../../hooks/useGeolocation'
+import LocationButton from './LocationButton'
 
-// Live location tracker — blue dot with pulse animation (like Apple/Google Maps)
-function LocationTracker() {
+// Live-location rendering inside the Leaflet map. Subscribes via the
+// shared useGeolocation hook so the Leaflet and Mapbox variants behave
+// identically. Heading is shown as a rotated conic SVG when available.
+import type { GeoPosition, TrackingMode } from '../../hooks/useGeolocation'
+
+function LeafletLocationLayer({ position, mode }: { position: GeoPosition | null; mode: TrackingMode }) {
   const map = useMap()
-  const [position, setPosition] = useState<[number, number] | null>(null)
-  const [accuracy, setAccuracy] = useState(0)
-  const [tracking, setTracking] = useState(false)
-  const watchId = useRef<number | null>(null)
 
-  const startTracking = useCallback(() => {
-    if (!('geolocation' in navigator)) return
-    setTracking(true)
-    watchId.current = navigator.geolocation.watchPosition(
-      (pos) => {
-        const latlng: [number, number] = [pos.coords.latitude, pos.coords.longitude]
-        setPosition(latlng)
-        setAccuracy(pos.coords.accuracy)
-      },
-      () => setTracking(false),
-      { enableHighAccuracy: true, maximumAge: 5000 }
-    )
-  }, [])
-
-  const stopTracking = useCallback(() => {
-    if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current)
-    watchId.current = null
-    setTracking(false)
-    setPosition(null)
-  }, [])
-
-  const toggleTracking = useCallback(() => {
-    if (tracking) { stopTracking() } else { startTracking() }
-  }, [tracking, startTracking, stopTracking])
-
-  // Center map on position when first acquired
-  const centered = useRef(false)
+  // When the user is in follow mode, keep the map centred on the dot.
+  // setView (no animation) is what Google Maps does during navigation —
+  // it feels responsive and avoids animation jitter at walking speed.
   useEffect(() => {
-    if (position && !centered.current) {
-      map.setView(position, 15)
-      centered.current = true
-    }
-  }, [position, map])
+    if (mode !== 'follow' || !position) return
+    try { map.setView([position.lat, position.lng], Math.max(map.getZoom(), 16), { animate: true, duration: 0.35 }) } catch { /* noop */ }
+  }, [position, mode, map])
 
-  // Cleanup on unmount
-  useEffect(() => () => { if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current) }, [])
+  // Once, when the user first acquires a fix in "show" mode, pan to it so
+  // they don't have to scroll the map. Subsequent fixes only move the dot.
+  const centeredRef = useRef(false)
+  useEffect(() => {
+    if (mode === 'off') { centeredRef.current = false; return }
+    if (!position || centeredRef.current) return
+    try { map.setView([position.lat, position.lng], Math.max(map.getZoom(), 15)) } catch { /* noop */ }
+    centeredRef.current = true
+  }, [position, mode, map])
+
+  if (!position) return null
+
+  const headingIcon = position.heading === null || Number.isNaN(position.heading) ? null : L.divIcon({
+    className: '',
+    iconSize: [60, 60],
+    iconAnchor: [30, 30],
+    html: `<div style="
+      width:60px;height:60px;
+      transform:rotate(${position.heading}deg);transition:transform 120ms ease-out;
+      background:conic-gradient(from -30deg, rgba(59,130,246,0) 0deg, rgba(59,130,246,0.35) 15deg, rgba(59,130,246,0) 60deg, rgba(59,130,246,0) 360deg);
+      border-radius:50%;
+      -webkit-mask:radial-gradient(circle, transparent 12px, black 13px);
+      mask:radial-gradient(circle, transparent 12px, black 13px);
+      pointer-events:none;
+    "></div>`,
+  })
 
   return (
     <>
-      {/* Location button */}
-      <div style={{
-        position: 'absolute', bottom: 20, right: 10, zIndex: 1000,
-      }}>
-        <button onClick={toggleTracking} style={{
-          width: 36, height: 36, borderRadius: '50%',
-          border: 'none', cursor: 'pointer',
-          background: tracking ? '#3b82f6' : 'var(--bg-card, white)',
-          color: tracking ? 'white' : 'var(--text-muted, #6b7280)',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          transition: 'background 0.2s, color 0.2s',
-        }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
-          </svg>
-        </button>
-      </div>
-
-      {/* Blue dot + accuracy circle */}
-      {position && (
-        <>
-          {accuracy < 500 && (
-            <Circle center={position} radius={accuracy} pathOptions={{ color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.06, weight: 0.5, opacity: 0.3 }} />
-          )}
-          <CircleMarker center={position} radius={7} pathOptions={{ color: 'white', fillColor: '#3b82f6', fillOpacity: 1, weight: 2.5 }} />
-        </>
+      {position.accuracy < 500 && (
+        <Circle
+          center={[position.lat, position.lng]}
+          radius={position.accuracy}
+          pathOptions={{ color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.12, weight: 1, opacity: 0.35 }}
+          interactive={false}
+        />
       )}
-
-      {/* Pulse animation CSS */}
-      {position && (
-        <style>{`
-          @keyframes location-pulse {
-            0% { transform: scale(1); opacity: 0.6; }
-            100% { transform: scale(2.5); opacity: 0; }
-          }
-        `}</style>
+      {headingIcon && (
+        <Marker
+          position={[position.lat, position.lng]}
+          icon={headingIcon}
+          interactive={false}
+          zIndexOffset={900}
+        />
       )}
+      <CircleMarker
+        center={[position.lat, position.lng]}
+        radius={8}
+        pathOptions={{ color: 'white', fillColor: '#3b82f6', fillOpacity: 1, weight: 3 }}
+        interactive={false}
+      />
     </>
   )
 }
@@ -561,8 +544,15 @@ export const MapView = memo(function MapView({
   const TooltipOverlay = hoveredPlace && tooltipPos && !isTouchDevice
   const CatIcon = TooltipOverlay ? getCategoryIcon(hoveredPlace.category_icon) : null
 
+  const { position: userPosition, mode: trackingMode, error: trackingError, cycleMode: cycleTrackingMode } = useGeolocation()
+  // Desktop browsers only get IP-based geolocation (city-level accuracy),
+  // so the button would be misleading. Mobile, where real GPS lives, keeps it.
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+  const locationButtonBottom = 'calc(var(--bottom-nav-h, 84px) + 12px)'
+
   return (
     <>
+    <div className="w-full h-full relative">
     <MapContainer
       id="trek-map"
       center={center}
@@ -586,7 +576,7 @@ export const MapView = memo(function MapView({
       <SelectionController places={places} selectedPlaceId={selectedPlaceId} dayPlaces={dayPlaces} paddingOpts={paddingOpts} />
       <MapClickHandler onClick={onMapClick} />
       <MapContextMenuHandler onContextMenu={onMapContextMenu} />
-      <LocationTracker />
+      <LeafletLocationLayer position={userPosition} mode={trackingMode} />
 
       <MarkerClusterGroup
         chunkedLoading
@@ -631,6 +621,13 @@ export const MapView = memo(function MapView({
         onEndpointClick={onReservationClick}
       />
     </MapContainer>
+    {isMobile && <LocationButton
+      mode={trackingMode}
+      error={trackingError}
+      onClick={cycleTrackingMode}
+      bottomOffset={locationButtonBottom as unknown as number}
+    />}
+    </div>
 
     {TooltipOverlay && (
       <div data-testid="tooltip" style={{
